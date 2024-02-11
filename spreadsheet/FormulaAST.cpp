@@ -72,7 +72,7 @@ public:
     virtual ~Expr() = default;
     virtual void Print(std::ostream& out) const = 0;
     virtual void DoPrintFormula(std::ostream& out, ExprPrecedence precedence) const = 0;
-    virtual double Evaluate(/*добавьте сюда нужные аргументы*/ args) const = 0;
+    virtual double Evaluate(const SheetInterface* sheet) const = 0;
 
     // higher is tighter
     virtual ExprPrecedence GetPrecedence() const = 0;
@@ -142,8 +142,38 @@ public:
         }
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/) const override {
-			// Скопируйте ваше решение из предыдущих уроков.
+    double Evaluate(const SheetInterface* sheet) const override {
+        double lhs = lhs_->Evaluate(sheet), rhs = rhs_->Evaluate(sheet);
+
+        double result;
+        switch (type_) {
+            case Add: {
+                result = lhs + rhs;
+                break;
+            }
+            case Subtract: {
+                result = lhs - rhs;
+                break;
+            }
+            case Multiply: {
+                result = lhs * rhs;
+                break;
+            }
+            case Divide: {
+                if (std::abs(rhs) <= 1e-7) {
+                    throw FormulaException("#DIV0");
+                }
+                result = lhs / rhs;
+                break;
+            }
+        }
+        if (std::isinf(result)) {
+            throw FormulaException("#DIV0");
+        }
+        if (!std::isfinite(result)) {
+            throw FormulaException("#ARITHM");
+        }
+        return result;
     }
 
 private:
@@ -180,8 +210,11 @@ public:
         return EP_UNARY;
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/ args) const override {
-        // Скопируйте ваше решение из предыдущих уроков.
+    double Evaluate(const SheetInterface* sheet) const override {
+        if (type_ == UnaryMinus) {
+            return -operand_->Evaluate(sheet);
+        }
+        return operand_->Evaluate(sheet);
     }
 
 private:
@@ -211,10 +244,26 @@ public:
         return EP_ATOM;
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/ args) const override {
-        // реализуйте метод.
-    }
+    double Evaluate(const SheetInterface* sheet) const override {
+        const auto cur_cell = sheet->GetCell(*cell_);
+        if (!cur_cell) {
+            return 0;
+        }
+        const auto cur_val = cur_cell->GetValue();
+        if (std::holds_alternative<double>(cur_val)) {
+            return std::get<double>(cur_val);
+        }
+        else if (std::holds_alternative<FormulaError>(cur_val)) {
+            throw FormulaException(std::string{std::get<FormulaError>(cur_val).ToString()});
+        }
+        else {
+            if (!std::get<std::string>(cur_val).empty()) {
+                throw FormulaException("#ARITHM");
+            }
+            return 0;
+        }
 
+    }
 private:
     const Position* cell_;
 };
@@ -237,7 +286,7 @@ public:
         return EP_ATOM;
     }
 
-    double Evaluate(/*добавьте нужные аргументы*/ args) const override {
+    double Evaluate(const SheetInterface* sheet = nullptr) const override {
         return value_;
     }
 
@@ -391,8 +440,8 @@ void FormulaAST::PrintFormula(std::ostream& out) const {
     root_expr_->PrintFormula(out, ASTImpl::EP_ATOM);
 }
 
-double FormulaAST::Execute(/*добавьте нужные аргументы*/ args) const {
-    return root_expr_->Evaluate(/*добавьте нужные аргументы*/ args);
+double FormulaAST::Execute(const SheetInterface *sheet) const {
+    return root_expr_->Evaluate(sheet);
 }
 
 FormulaAST::FormulaAST(std::unique_ptr<ASTImpl::Expr> root_expr, std::forward_list<Position> cells)

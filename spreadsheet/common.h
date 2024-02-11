@@ -31,6 +31,7 @@ struct Size {
     int cols = 0;
 
     bool operator==(Size rhs) const;
+    bool operator<(Size rhs) const;
 };
 
 // Описывает ошибки, которые могут возникнуть при вычислении формулы.
@@ -42,13 +43,20 @@ public:
         Div0,  // в результате вычисления возникло деление на ноль
     };
 
-    FormulaError(Category category);
+    FormulaError(Category category) : category_(category) {}
 
-    Category GetCategory() const;
+    Category GetCategory() const {return category_;}
 
-    bool operator==(FormulaError rhs) const;
+    bool operator==(FormulaError rhs) const {return category_ == rhs.category_;}
 
-    std::string_view ToString() const;
+    std::string_view ToString() const {
+        switch (GetCategory()) {
+            case FormulaError::Category::Ref: return "#REF!";
+            case FormulaError::Category::Value: [[fallthrough]];
+            case FormulaError::Category::Div0: return "#ARITHM!";
+            default: return "";
+        }
+    }
 
 private:
     Category category_;
@@ -72,6 +80,11 @@ public:
 // Исключение, выбрасываемое при попытке задать формулу, которая приводит к
 // циклической зависимости между ячейками
 class CircularDependencyException : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
+class CalculationForEmptyCellException : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };

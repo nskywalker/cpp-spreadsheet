@@ -1,6 +1,10 @@
+#include <limits>
 #include "common.h"
 #include "formula.h"
 #include "test_runner_p.h"
+#include <cassert>
+
+using namespace std::literals::string_literals;
 
 inline std::ostream& operator<<(std::ostream& output, Position pos) {
     return output << "(" << pos.row << ", " << pos.col << ")";
@@ -24,9 +28,6 @@ inline std::ostream& operator<<(std::ostream& output, const CellInterface::Value
 }
 
 namespace {
-std::string ToString(FormulaError::Category category) {
-    return std::string(FormulaError(category).ToString());
-}
 
 void TestPositionAndStringConversion() {
     auto testSingle = [](Position pos, std::string_view str) {
@@ -197,8 +198,14 @@ void TestErrorValue() {
     auto sheet = CreateSheet();
     sheet->SetCell("E2"_pos, "A1");
     sheet->SetCell("E4"_pos, "=E2");
+
+    const auto v1 = CellInterface::Value(FormulaError::Category::Value);
+    const auto v = sheet->GetCell("E4"_pos)->GetValue();
+
+
     ASSERT_EQUAL(sheet->GetCell("E4"_pos)->GetValue(),
                  CellInterface::Value(FormulaError::Category::Value));
+
 
     sheet->SetCell("E2"_pos, "3D");
     ASSERT_EQUAL(sheet->GetCell("E4"_pos)->GetValue(),
@@ -250,7 +257,7 @@ void TestErrorDiv0() {
 void TestEmptyCellTreatedAsZero() {
     auto sheet = CreateSheet();
     sheet->SetCell("A1"_pos, "=B2");
-    ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetValue(), CellInterface::Value(0));
+    ASSERT_EQUAL(sheet->GetCell("A1"_pos)->GetValue(), CellInterface::Value(0.0));
 }
 
 void TestFormulaInvalidPosition() {
@@ -271,6 +278,7 @@ void TestFormulaInvalidPosition() {
     try_formula("=XFD16385");
     try_formula("=XFE16384");
     try_formula("=R2D2");
+    try_formula("=A3/ZZZ2");
 }
 
 void TestPrint() {
@@ -282,6 +290,7 @@ void TestPrint() {
 
     std::ostringstream texts;
     sheet->PrintTexts(texts);
+    auto str = texts.str();
     ASSERT_EQUAL(texts.str(), "\t\nmeow\t=35\n");
 
     std::ostringstream values;
@@ -349,8 +358,102 @@ void TestCellCircularReferences() {
 }
 }  // namespace
 
+
+
+void PrintSheet(const std::unique_ptr<SheetInterface>& sheet) {
+    std::cout << sheet->GetPrintableSize() << std::endl;
+    sheet->PrintTexts(std::cout);
+    std::cout << std::endl;
+    sheet->PrintValues(std::cout);
+    std::cout << std::endl;
+}
+
+void my_test() {
+    auto sheet = CreateSheet();
+    sheet->SetCell("A1"_pos, "=0/0");
+    PrintSheet(sheet);
+}
+
+void TestSetPrint() {
+    auto sheet = CreateSheet();
+    for (int i = 0; i <= 5; ++i) {
+        sheet->SetCell(Position{i, i}, std::to_string(i));
+        PrintSheet(sheet);
+    }
+    std::ostringstream texts;
+    sheet->PrintTexts(texts);
+    auto str = texts.str();
+    ASSERT_EQUAL(texts.str(), "0\t\t\t\t\t\n\t1\t\t\t\t\n\t\t2\t\t\t\n\t\t\t3\t\t\n\t\t\t\t4\t\n\t\t\t\t\t5\n"s);
+    std::cerr << "TestSetPrint OK"s << std::endl;
+}
+
+
+void TestExample() {
+    using namespace std;
+    auto sheet = CreateSheet();
+    sheet->SetCell("A1"_pos, "=(1+2)*3");
+    sheet->SetCell("B1"_pos, "=1+(2*3)");
+
+    sheet->SetCell("A2"_pos, "some");
+    sheet->SetCell("B2"_pos, "text");
+    sheet->SetCell("C2"_pos, "here");
+
+    sheet->SetCell("C3"_pos, "'and'");
+    sheet->SetCell("D3"_pos, "'here");
+
+    sheet->SetCell("B5"_pos, "=1/0");
+
+    ostringstream printable_size_sheet;
+    printable_size_sheet << sheet->GetPrintableSize();
+    ASSERT_EQUAL(printable_size_sheet.str(), "(5, 4)"s);
+
+    ostringstream text_out;
+    sheet->PrintTexts(text_out);
+    ostringstream text_out_expected {
+            "=(1+2)*3\t=1+2*3\t\t\n"s
+                    "some\ttext\there\t\n"s
+                            "\t\t'and'\t'here\n"
+                            "\t\t\t\n"s
+                                    "\t=1/0\t\t\n"s
+    };
+    ASSERT_EQUAL(text_out.str(), text_out_expected.str());
+
+    ostringstream values_out;
+    sheet->PrintValues(values_out);
+    ostringstream values_expected {
+            "9\t7\t\t\n"s
+                    "some\ttext\there\t\n"s
+                            "\t\tand'\there\n"
+                            "\t\t\t\n"s
+                                    "\t#ARITHM!\t\t\n"s
+    };
+    ASSERT_EQUAL(values_out.str(), values_expected.str());
+}
+
+void TestClearPrint() {
+    auto sheet = CreateSheet();
+    for (int i = 0; i <= 5; ++i) {
+        sheet->SetCell(Position{i, i}, std::to_string(i));
+    }
+
+    sheet->ClearCell(Position{3, 3});
+
+    for (int i = 5; i >= 0; --i) {
+        sheet->ClearCell(Position{i, i});
+        PrintSheet(sheet);
+    }
+}
+
+
 int main() {
-    TestRunner tr;
+    TestClearPrint();
+}
+
+int main1() {
+    my_test();
+//    TestSetPrint();
+//    TestClearPrint();
+    /*TestRunner tr;
     RUN_TEST(tr, TestPositionAndStringConversion);
     RUN_TEST(tr, TestPositionToStringInvalid);
     RUN_TEST(tr, TestStringToPositionInvalid);
@@ -370,4 +473,5 @@ int main() {
     RUN_TEST(tr, TestCellReferences);
     RUN_TEST(tr, TestFormulaIncorrect);
     RUN_TEST(tr, TestCellCircularReferences);
+    return 0;*/
 }
